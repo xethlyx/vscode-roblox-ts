@@ -15,9 +15,9 @@ import type ts = require('typescript');
 interface ProjectCompilation {
 	terminal: VirtualTerminal;
 	status:
-		| { type: "success", since: number }
+		| { type: "success", since: number, timeout: number }
 		| { type: "compiling" }
-		| { type: "error", count: number };
+		| { type: "error", count: number, since: number, timeout: number };
 	cancel?: () => void;
 }
 
@@ -145,13 +145,22 @@ export async function activate(context: vscode.ExtensionContext) {
 				}
 
 				case "error": {
-					statusBarItem.text = `${compilation.status.count} $(error) roblox-ts`;
-					statusBarItem.color = new vscode.ThemeColor("errorForeground");
+					if (compilation.status.timeout !== -1 && Date.now() - compilation.status.since >= compilation.status.timeout) {
+						statusBarItem.text = "$(debug-stop) roblox-ts";
+						statusBarItem.color = undefined;
+					} else {
+						statusBarItem.text = `${compilation.status.count} $(error) roblox-ts`;
+						if (vscode.workspace.getConfiguration("roblox-ts.command.status").get("errorMessageColor", false)) {
+							statusBarItem.color = new vscode.ThemeColor("errorForeground");
+						} else {
+							statusBarItem.color = undefined;
+						}
+					}
 					break;
 				}
 
 				case "success": {
-					if (Date.now() - compilation.status.since >= 2000) {
+					if (compilation.status.timeout !== -1 && Date.now() - compilation.status.since >= compilation.status.timeout) {
 						statusBarItem.text = "$(debug-stop) roblox-ts";
 					} else {
 						statusBarItem.text = "$(check) roblox-ts";
@@ -261,12 +270,26 @@ export async function activate(context: vscode.ExtensionContext) {
 				if (finished) {
 					const errors = +finished[1];
 					if (errors > 0) {
-						compilation.status = { type: "error", count: errors };
+						const timeout = vscode.workspace.getConfiguration("roblox-ts.command.status").get("errorMessageDuration", 2000);
+
+						compilation.status = {
+							type: "error",
+							since: Date.now(),
+							count: errors,
+							timeout,
+						};
+						setTimeout(updateStatusBarState, timeout);
 					} else {
-						compilation.status = { type: "success", since: Date.now() };
+						const timeout = vscode.workspace.getConfiguration("roblox-ts.command.status").get("successMessageDuration", 2000);
+
+						compilation.status = {
+							type: "success",
+							since: Date.now(),
+							timeout,
+						};
+						setTimeout(updateStatusBarState, timeout);
 					}
 					updateStatusBarState();
-					setTimeout(updateStatusBarState, 2000);
 				}
 			}
 
